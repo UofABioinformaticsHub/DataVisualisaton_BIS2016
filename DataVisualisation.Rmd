@@ -1,0 +1,22 @@
+---
+title: "Data Visualisation"
+author: "Steve Pederson"
+date: "2 December 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# RNA Seq
+
+- PCA with ellipses
+- PCR with error bars
+- Volcano plot with labels
+- pheatmap with extra annotations
+
+# SNP data
+- also a `pheatmap`
+- manhattan plot
+- circos plot
