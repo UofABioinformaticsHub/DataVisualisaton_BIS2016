@@ -123,6 +123,68 @@ $(document).ready(function () {
 </div>
 
 
+<pre class="r"><code>library(readr)
+library(dplyr)
+library(tibble)
+library(magrittr)
+library(edgeR)
+library(ggplot2)
+library(ggbio)
+library(biomaRt)</code></pre>
+<div id="todays-data" class="section level1">
+<h1>Today’s Data</h1>
+<div id="about-the-rna-seq-data" class="section level2">
+<h2>About the RNA-Seq data</h2>
+<p>Today’s data was originally obtained from the GEO dataset <code>GSE89057</code> and is titled: <em>“RNA-seq of SOX5 overexpressing primary human neuronal progenitors”</em></p>
+<p>Full protocols can be found at <a href="https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE89057" class="uri">https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE89057</a></p>
+<p>We will simply be using the raw counts for each gene, and differential expression analysis will not form a significant part of today’s session. Our main focus will be to explore some different options for visualising data using the <code>R</code> packages <code>ggplot2</code> and <code>ggbio</code></p>
+<p>The astute amongst you may notice that alignments were performed using <code>GRCh37.73</code>. However, as we will be working with gene-level summaries, we can use <code>GRCh38</code> with no significant difficulties.</p>
+</div>
+<div id="loading-the-data" class="section level2">
+<h2>Loading the data</h2>
+<p>First we need to load in the sample meta data</p>
+<pre class="r"><code>mData &lt;- read_delim(&quot;data/GSE89057_metaData.txt&quot;, delim = &quot;\t&quot;)</code></pre>
+<p>Now we can load in the count data</p>
+<pre class="r"><code>counts &lt;- read.table(&quot;data/GSE89057_HTSeq_Unnormalized_Counts.txt&quot;, sep = &quot;\t&quot;, row.names = 1) </code></pre>
+<p>Form a <code>DGEList</code>, ignoring some of the columns in the meta data that will already be included.</p>
+<pre class="r"><code>dgeList &lt;- DGEList(counts, 
+                   samples = dplyr::select(mData, -Condition, -SampleID), 
+                   group = mData$Condition)</code></pre>
+<p>The Library sizes &amp; total read numbers don’t match, this will likely be due to:</p>
+<ul>
+<li><code>Total_Reads</code> counting read pairs as two separate reads</li>
+<li>Some reads not aligning</li>
+<li>Some reads aligning mutliple times</li>
+</ul>
+<p>Alignment and generation of read summaries was performed by the authors prior to uploading and is not of great importance for today.</p>
+</div>
+<div id="getting-some-gene-annotations" class="section level2">
+<h2>Getting Some Gene Annotations</h2>
+<p>Before moving on, we can add some summary information about the genes. However, first we might need to remove that suffix after the EnsemblID in the <code>counts</code> object.</p>
+<pre class="r"><code>ensemblIDs &lt;- gsub(&quot;(ENSG[0-9]+)\\..*&quot;, &quot;\\1&quot;, rownames(counts))</code></pre>
+<p>Now we can use the package <code>biomaRt</code> to download some annotation data. First we’ll need to form an <code>R</code> object which connects to the Biomart database hosted at Ensembl.</p>
+<pre class="r"><code>mart &lt;- useMart(&quot;ENSEMBL_MART_ENSEMBL&quot;, dataset = &quot;hsapiens_gene_ensembl&quot;)</code></pre>
+<p>Now we’ll sepcify the key attributes about each gene that we’re interested in, such as:</p>
+<ul>
+<li>the common name</li>
+<li>the chromosome, strand, start and end positions</li>
+<li>the gene biotype</li>
+</ul>
+<pre class="r"><code>attr2Get &lt;- c(&quot;ensembl_gene_id&quot;, &quot;external_gene_name&quot;, 
+              &quot;chromosome_name&quot;, &quot;strand&quot;, &quot;start_position&quot;, &quot;end_position&quot;, 
+              &quot;gene_biotype&quot;)</code></pre>
+<p>We can now use the function <code>getBM()</code> to download this data into our <code>R</code> workspace.</p>
+<pre class="r"><code>geneData &lt;- getBM(attr2Get, filters = &quot;ensembl_gene_id&quot;, values = ensemblIDs, mart = mart)</code></pre>
+<p>Unfortunately, it looks like some genes are missing and our downloaded data won’t match our count data exactly.</p>
+<pre class="r"><code>length(ensemblIDs)
+nrow(dgeList)
+nrow(geneData)</code></pre>
+<p>We can resolve this using the function <code>left_join()</code> from the package <code>dplyr</code> while we add this to our <code>dgeList</code> objects</p>
+<pre class="r"><code>dgeList$genes &lt;- data_frame(ensembl_gene_id = ensemblIDs) %&gt;%
+  left_join(geneData)</code></pre>
+<p>Let’s start plotting.</p>
+</div>
+</div>
 <div id="rna-seq" class="section level1">
 <h1>RNA Seq</h1>
 <ul>
@@ -139,6 +201,8 @@ $(document).ready(function () {
 <li>manhattan plot</li>
 <li>circos plot</li>
 </ul>
+<p><a href="http://www.gettinggeneticsdone.com/search?updated-min=2016-01-01T00:00:00-06:00&amp;updated-max=2017-01-01T00:00:00-06:00&amp;max-results=5" class="uri">http://www.gettinggeneticsdone.com/search?updated-min=2016-01-01T00:00:00-06:00&amp;updated-max=2017-01-01T00:00:00-06:00&amp;max-results=5</a></p>
+<p><a href="http://rstudio-pubs-static.s3.amazonaws.com/2176_09c34787e1c64584a2bc84444afa7c61.html" class="uri">http://rstudio-pubs-static.s3.amazonaws.com/2176_09c34787e1c64584a2bc84444afa7c61.html</a></p>
 </div>
 
 

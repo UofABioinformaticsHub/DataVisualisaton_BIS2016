@@ -1,0 +1,13 @@
+Accession	SampleID	Condition	Construct	Treatment	Total_Reads
+GSM2358062	Control.1	Control	pLVU-GFP	GFP Overexpression	9414372
+GSM2358063	Control.2	Control	pLVU-GFP	GFP Overexpression	8864407
+GSM2358064	Control.3	Control	pLVU-GFP	GFP Overexpression	9411314
+GSM2358065	Control.4	Control	pLVU-GFP	GFP Overexpression	9675029
+GSM2358066	Control.5	Control	pLVU-GFP	GFP Overexpression	9475940
+GSM2358067	Control.6	Control	pLVU-GFP	GFP Overexpression	6091834
+GSM2358068	SOX5.OverExp.1	SOX5	pLVU-SOX5-GFP	SOX5 Overexpression	7948865
+GSM2358069	SOX5.OverExp.2	SOX5	pLVU-SOX5-GFP	SOX5 Overexpression	9414836
+GSM2358070	SOX5.OverExp.3	SOX5	pLVU-SOX5-GFP	SOX5 Overexpression	11605717
+GSM2358071	SOX5.OverExp.4	SOX5	pLVU-SOX5-GFP	SOX5 Overexpression	9009915
+GSM2358072	SOX5.OverExp.5	SOX5	pLVU-SOX5-GFP	SOX5 Overexpression	9086903
+GSM2358073	SOX5.OverExp.6	SOX5	pLVU-SOX5-GFP	SOX5 Overexpression	11184034

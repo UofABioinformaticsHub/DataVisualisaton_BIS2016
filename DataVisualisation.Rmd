@@ -6,8 +6,120 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, include = TRUE, results = "hide",
+                      warning = FALSE, message = FALSE)
 ```
+
+```{r loadPkgs}
+library(readr)
+library(dplyr)
+library(tibble)
+library(magrittr)
+library(edgeR)
+library(ggplot2)
+library(ggbio)
+library(biomaRt)
+```
+
+
+
+# Today's Data
+
+## About the RNA-Seq data
+
+Today's data was originally obtained from the GEO dataset `GSE89057` and is titled: _"RNA-seq of SOX5 overexpressing primary human neuronal progenitors"_
+
+Full protocols can be found at https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE89057
+
+We will simply be using the raw counts for each gene, and differential expression analysis will not form a significant part of today's session.
+Our main focus will be to explore some different options for visualising data using the `R` packages `ggplot2` and `ggbio`
+
+The astute amongst you may notice that alignments were performed using `GRCh37.73`.
+However, as we will be working with gene-level summaries, we can use `GRCh38` with no significant difficulties.
+
+## Loading the data
+
+First we need to load in the sample meta data
+
+```{r mData}
+mData <- read_delim("data/GSE89057_metaData.txt", delim = "\t")
+```
+
+Now we can load in the count data
+
+```{r counts}
+counts <- read.table("data/GSE89057_HTSeq_Unnormalized_Counts.txt", sep = "\t", row.names = 1) 
+```
+
+Form a `DGEList`, ignoring some of the columns in the meta data that will already be included.
+
+```{r dgeList}
+dgeList <- DGEList(counts, 
+                   samples = dplyr::select(mData, -Condition, -SampleID), 
+                   group = mData$Condition)
+```
+
+The Library sizes & total read numbers don't match, this will likely be due to:
+
+- `Total_Reads` counting read pairs as two separate reads
+- Some reads not aligning
+- Some reads aligning mutliple times
+
+Alignment and generation of read summaries was performed by the authors prior to uploading and is not of great importance for today.
+
+## Getting Some Gene Annotations
+
+Before moving on, we can add some summary information about the genes.
+However, first we might need to remove that suffix after the EnsemblID in the `counts` object.
+
+```{r ensemblIDs}
+ensemblIDs <- gsub("(ENSG[0-9]+)\\..*", "\\1", rownames(counts))
+```
+
+Now we can use the package `biomaRt` to download some annotation data.
+First we'll need to form an `R` object which connects to the Biomart database hosted at Ensembl.
+
+```{r mart, cache=TRUE}
+mart <- useMart("ENSEMBL_MART_ENSEMBL", dataset = "hsapiens_gene_ensembl")
+```
+
+
+Now we'll sepcify the key attributes about each gene that we're interested in, such as:
+
+- the common name
+- the chromosome, strand, start and end positions
+- the gene biotype
+
+```{r attr2Get}
+attr2Get <- c("ensembl_gene_id", "external_gene_name", 
+              "chromosome_name", "strand", "start_position", "end_position", 
+              "gene_biotype")
+```
+
+We can now use the function `getBM()` to download this data into our `R` workspace.
+
+```{r geneData, cache=TRUE}
+geneData <- getBM(attr2Get, filters = "ensembl_gene_id", values = ensemblIDs, mart = mart)
+```
+
+Unfortunately, it looks like some genes are missing and our downloaded data won't match our count data exactly.
+
+```{r compLens}
+length(ensemblIDs)
+nrow(dgeList)
+nrow(geneData)
+```
+
+We can resolve this using the function `left_join()` from the package `dplyr` while we add this to our `dgeList` objects
+
+```{r addGenes}
+dgeList$genes <- data_frame(ensembl_gene_id = ensemblIDs) %>%
+  left_join(geneData)
+```
+
+
+Let's start plotting.
+
 
 # RNA Seq
 
