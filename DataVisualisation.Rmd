@@ -6,7 +6,8 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, include = TRUE, results = "hide",
+knitr::opts_chunk$set(echo = TRUE, include = TRUE, 
+                      results = "hide", fig.show = "hide",
                       warning = FALSE, message = FALSE)
 ```
 
@@ -19,15 +20,19 @@ library(edgeR)
 library(ggplot2)
 library(ggbio)
 library(biomaRt)
+library(stringr)
+library(reshape2)
+library(magrittr)
+library(ggrepel)
 ```
 
 
 
-# Today's Data
+# Data Preparation
 
-## About the RNA-Seq data
+## Today's RNA-Seq data
 
-Today's data was originally obtained from the GEO dataset `GSE89057` and is titled: _"RNA-seq of SOX5 overexpressing primary human neuronal progenitors"_
+Today's data was obtained from the GEO dataset `GSE89057` from an experiment titled: _"RNA-seq of SOX5 overexpressing primary human neuronal progenitors"_
 
 Full protocols can be found at https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE89057
 
@@ -39,19 +44,27 @@ However, as we will be working with gene-level summaries, we can use `GRCh38` wi
 
 ## Loading the data
 
-First we need to load in the sample meta data
+First we need to load in the sample meta-data
 
 ```{r mData}
 mData <- read_delim("data/GSE89057_metaData.txt", delim = "\t")
 ```
 
-Now we can load in the count data
+Now we can load in the count data, then have a glance at the first few lines.
 
 ```{r counts}
 counts <- read.table("data/GSE89057_HTSeq_Unnormalized_Counts.txt", sep = "\t", row.names = 1) 
+head(counts)
 ```
 
-Form a `DGEList`, ignoring some of the columns in the meta data that will already be included.
+The rownames here are the gene ids, but we might like to tidy those up a little by removing the suffix.
+
+```{r}
+ensemblIDs <- str_extract(rownames(counts),  "ENSG[0-9]+") 
+rownames(counts) <- ensemblIDs
+```
+
+Form a `DGEList`, ignoring some of the columns in the meta data that will already be included as art of the standard `DGEList`structure.
 
 ```{r dgeList}
 dgeList <- DGEList(counts, 
@@ -70,21 +83,14 @@ Alignment and generation of read summaries was performed by the authors prior to
 ## Getting Some Gene Annotations
 
 Before moving on, we can add some summary information about the genes.
-However, first we might need to remove that suffix after the EnsemblID in the `counts` object.
-
-```{r ensemblIDs}
-ensemblIDs <- gsub("(ENSG[0-9]+)\\..*", "\\1", rownames(counts))
-```
-
-Now we can use the package `biomaRt` to download some annotation data.
-First we'll need to form an `R` object which connects to the Biomart database hosted at Ensembl.
+We'll use the package `biomaRt` to download some annotation data.
+First we'll need to form an `R` object called `mart` which connects to the Biomart database hosted at Ensembl.
 
 ```{r mart, cache=TRUE}
 mart <- useMart("ENSEMBL_MART_ENSEMBL", dataset = "hsapiens_gene_ensembl")
 ```
 
-
-Now we'll sepcify the key attributes about each gene that we're interested in, such as:
+Next we'll specify the key attributes about each gene that we're interested in, such as:
 
 - the common name
 - the chromosome, strand, start and end positions
@@ -96,7 +102,8 @@ attr2Get <- c("ensembl_gene_id", "external_gene_name",
               "gene_biotype")
 ```
 
-We can now use the function `getBM()` to download this data into our `R` workspace.
+We can use the function `getBM()` to download this data directly into our `R` workspace.
+This may take a little while to extract then send the information around the world.
 
 ```{r geneData, cache=TRUE}
 geneData <- getBM(attr2Get, filters = "ensembl_gene_id", values = ensemblIDs, mart = mart)
@@ -110,15 +117,322 @@ nrow(dgeList)
 nrow(geneData)
 ```
 
-We can resolve this using the function `left_join()` from the package `dplyr` while we add this to our `dgeList` objects
+We can resolve this using the function `left_join()` from the package `dplyr` while we add this to our `dgeList` objects.
+This will take the first `data_frame` as the reference, then add a row filled with `NA` values for the EnsemblIDs not returned by the function `getBM()` as they will be missing from the `geneData` object.
 
 ```{r addGenes}
-dgeList$genes <- data_frame(ensembl_gene_id = ensemblIDs) %>%
-  left_join(geneData)
+dgeList$genes <- left_join(x = data_frame(ensembl_gene_id = ensemblIDs),
+                           y = geneData)
 ```
 
 
-Let's start plotting.
+# Some Initial Plots
+
+## Plotting Read Totals using a Bar-Plot
+
+A common plot to form might be a simple barplot, showing the total read counts for each sample.
+We'll step through each of the plotting stages in the package `ggplot2` to understand the key concepts first.
+
+The plotting functions in `ggplot2` require data to be in an `R` object type known as a `data.frame`, which looks similar to a spreadsheet.
+These objects have a series of columns, each of which is filled with the same type of values (i.e. they are known as vectors in `R` lingo).
+
+The `samples` component of the previous `dgeList` object is a `data.frame`, so we can start with this.
+The first step is to pass this object to the main function `ggplot()`.
+
+### Introducing Plotting Aesthetics
+
+At this point we specify what we'd like as the main plotting aesthetics, and these can include what column is to be shown on the `x`-axis, the `y`-axis, as well as any columns that can be used to group the values by outline `colour`, `fill` colours or plotting `shape`.
+
+To start with, we can use the `Accession` ID along the `x`-axis and the Library Size (`lib.size`)as the height of the bars.
+We can fill the bars based on the `group` column.
+
+
+```{r}
+ggplot(dgeList$samples, aes(x = Accession, y = lib.size, fill = group))
+```
+
+### Choosing a type of geometry for the plot
+
+This initial command simply lays out the plotting area for us, but doesn't plot the data.
+To generate an actual plot, `ggplot2` requires us to specify the plotting geometry using a function called a `geom` which we add to the initial plot layout.
+There are many types of `geom` functions, but here we'll start with `geom_bar()`.
+By default this tries to add any like values, so we'll need to use the additional command `stat ="identity"` to tell the function to just plot the actual numbers we give it.
+
+Note that this now requires as to use a `+` symbol at the endof the initial function.
+This tells `R` there is more to come, and that we are adding layers to this object.
+
+```{r}
+ggplot(dgeList$samples, aes(x = Accession, y = lib.size, fill = group)) +
+  geom_bar(stat = "identity")
+```
+
+### Changing Axis and Legend Titles
+
+The title on the `x`-axis looks OK, but we can make the titles of the legend and the `y`-axis look a little nicer by adding capital letters.
+`ggplot2` does this by using the `labs()` function which we can add as an additional layer, with a `+` sign after the call to `geom_bar()`.
+
+```{r}
+ggplot(dgeList$samples, aes(x = Accession, y = lib.size, fill = group)) +
+  geom_bar(stat = "identity") +
+  labs(y = "Library Size", fill = "Group")
+```
+
+We might even like to plot those library sizes in millions, which is very easy to do using `ggplot2`.
+This can be specified in the initial layout by telling `ggplot()` to just divide the `lib.sizes` column by one million (`1e06`).
+We'll also change the axis label to reflect this.
+
+```{r}
+ggplot(dgeList$samples, aes(x = Accession, y = lib.size/1e06, fill = group)) +
+  geom_bar(stat = "identity") +
+  labs(y = "Library Size (millions)", fill = "Group")
+```
+
+#### Using themes
+
+Whilst some people like the default grey background, many don't and this can be simply removed using a default plotting theme called `theme_bw()`.
+Once we've removed this, we'll then start to tweak a few more aspects of the plot using this idea of a `theme()` as well.
+This is how many of the visual aspects are defined in `ggplot2`.
+
+Clear the background, and note that this also adds a plot outline, and changes the axis labels and titles to black.
+
+```{r}
+ggplot(dgeList$samples, aes(x = Accession, y = lib.size/1e06, fill = group)) +
+  geom_bar(stat = "identity") +
+  labs(y = "Library Size (millions)", fill = "Group") +
+  theme_bw()
+```
+
+On a laptop, those values on the `x`-axis can be hard to read.
+To change these we'll use the `theme()` function, so let's look at this first to see what aspects of the plot we can change (there's a lot here).
+
+```{r, eval=FALSE}
+?theme
+```
+
+The aspect we need to change is called `axis.text.x`, and a range of parameters for the text can be changed.
+These are wrapped in a function called `element_text()`, so let's look at this too before we dig any further.
+
+```{r, eval=FALSE}
+?element_text
+```
+
+Here you can see that we're able to change the font `family`, the font `face`, the font `colour` (with a `u`!) and many more.
+We'll use this to rotate the labels by 90$^{\circ}$ so we'll set the `angle` of the text.
+
+```{r}
+ggplot(dgeList$samples, aes(x = Accession, y = lib.size/1e06, fill = group)) +
+  geom_bar(stat = "identity") +
+  labs(y = "Library Size (millions)", fill = "Group") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90))
+```
+
+### The use of elements
+
+In the `theme()` function plotting aspects which are text based are always set using `element_text()`, whilst those which are line based areset using `element_line()`.
+Things like the plot outline are set using `element_rect()`, whilst the entire plotting aspect can be removed using `element_blank()`.
+If we'd used `theme(axis.text.x = element_blank())` in the above, the `x`-axis labels would have been removed.
+If you're racing ahead, try it..
+
+### Introducting Facets
+
+The last plotting trick that `ggplot2` uses is the ability to subset the plot into multiple facets, or sub-sections within the same plot.
+We could use the `group` column to break the previous plot into the two treatment groups using the `facet_wrap()` function.
+This uses the common `R` syntax of `~group` which can be interpreted as `is dependent on group`.
+
+```{r}
+ggplot(dgeList$samples, aes(x = Accession, y = lib.size/1e06, fill = group)) +
+  geom_bar(stat = "identity") +
+  labs(y = "Library Size (millions)", fill = "Group") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90)) +
+  facet_wrap(~group)
+```
+
+In this case, `ggplot2` has tried to keep the `x`-axis consistent across both facets, but these can be set as free from each other using `scales = "free_x"` inside the function.
+
+```{r}
+ggplot(dgeList$samples, aes(x = Accession, y = lib.size/1e06, fill = group)) +
+  geom_bar(stat = "identity") +
+  labs(y = "Library Size (millions)", fill = "Group") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90)) +
+  facet_wrap(~group, scales = "free_x")
+```
+
+### Guides
+
+Now we've done this, we might like to hide the legend, which is done using the `guides()` function.
+
+```{r}
+ggplot(dgeList$samples, aes(x = Accession, y = lib.size/1e06, fill = group)) +
+  geom_bar(stat = "identity") +
+  labs(y = "Library Size (millions)", fill = "Group") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90)) +
+  facet_wrap(~group, scales = "free_x") +
+  guides(fill = FALSE)
+```
+
+OK! NOw we've covereda huge amount of the terminology for `ggplot2`, we'll keep using this and try a few different types of plots.
+
+## Boxplots For Each Sample
+
+Another way to look at this data, might be to make a boxplot of the gene counts within each sample.
+This is also simple using `ggplot()`.
+
+However, remember that we need to give a single column to the `y`-axis in the plotting aesthetics, so we'll need to put all counts into a single column.
+We can do this on the fly using the function `melt()` from the package `reshape2`, which literally melts the data into a single column.
+
+We'll need to use the `counts` element of the `dgeList` object here, which is an `R` data type known as a `matrix`.
+This differs from a `data.frame` in that all columns have the same type of data, which in this instance is all `integer` values.
+
+Note that we've used a useful feature known as the `magrittr` (`%>%`) which takes the output of one function, and places it into the first position of the next function.
+This is equivalent to a pipe in bash (|) for those who are familiar with this.
+Using this saves the creation of multiple similar objects in our `R` workspace and keeps them much less cluttered.
+(See https://en.wikipedia.org/wiki/The_Treachery_of_Images) to be in on this hilarious programmers joke.
+
+Let's have a sneak peek at how this works.
+
+```{r}
+dgeList$counts %>%
+  melt(varnames = c("EnsemblID", "Sample"), value.name = "Count") %>%
+  head
+```
+
+Note that now we have a `data.frame` (i.e. two columns are text, whilst one is an integer), and that now our counts are all in a single column.
+We can also use the `magrittr` to place our molten data into the `ggplot()` function.
+After we've done this, wejust keep adding layers like before, but this time our geometry will be `geom_boxplot()`.
+
+```{r}
+dgeList$counts %>%
+  melt(varnames = c("EnsemblID", "Sample"), value.name = "Count") %>%
+  ggplot(aes(x = Sample, y = Count)) +
+  geom_boxplot()
+```
+
+As well as using our previous tricks to remove the grey background and rotate the axis text, we can change the scale of the `y` axis to be on the `log10` scale.
+
+```{r}
+dgeList$counts %>%
+  melt(varnames = c("EnsemblID", "SampleID"), value.name = "Count") %>%
+  ggplot(aes(x = SampleID, y = Count)) +
+  geom_boxplot() +
+  scale_y_log10()
+```
+
+That warning message you'll see is just letting you know that some zero-valued entries were removed as `log10(0) = -`$\infty$.
+
+### Adding Information from the Meta-Data
+
+Here we've started with just the counts, and after using `melt()` have ended up with three columns: a) the `EnsemblID`, b) the `SampleID` and c) the `Count` of aligned reads for that gene.
+This doesn't give us enough information to colour our boxes using the treatment groups, but we know this information is in both the original `mData` object and the `samples` element of `dgeList`.
+We could get this information from either, so let's use the `left_join()` approach we used earlier to get the information from the `mData` object.
+Note that we cleverly named our column `SampleID` to match the column in the `mData` object.
+
+Let's check the results from `mData` first using the `head` command, then we'll make the plot
+
+```{r}
+dgeList$counts %>%
+  melt(varnames = c("EnsemblID", "SampleID"), value.name = "Count") %>%
+  left_join(mData) %>%
+  head
+```
+
+Note how it's merged the two `data.frame` objects using the common column name.
+The function `left_join()` takes the first object as the reference (the output of `melt()`) and matches all the values from the second object to this.
+As this has effectively added the `Accession` column as well, we could use this as a nicer axis label.
+
+
+```{r}
+dgeList$counts %>%
+  melt(varnames = c("EnsemblID", "SampleID"), value.name = "Count") %>%
+  left_join(mData) %>%
+  ggplot(aes(x = Accession, y = Count, fill = Condition)) +
+  geom_boxplot() +
+  scale_y_log10() +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5)) 
+```
+
+#### What do you think the `vjust = 0.5` command did in the above?
+
+## MDS plots
+
+A common plot in RNA-Seq analysis in the MDS (or multi-dimensional scaling) plot.
+By default, most people use the function `plotMDS()` from `edgeR`.
+
+```{r}
+plotMDS(dgeList)
+```
+
+We can use `ggplot2` to tidy this up, by saving the output of `plotMDS()` as an `R` object.
+This will contain the key plotting values hidden away as a matrix, which we can pull out and use to customise our plot.
+
+```{r}
+mds <- plotMDS(dgeList)
+```
+
+Firs we'll convert this to a `data.frame` on the fly using the `%>%` symbol, and a couple of other handy functions to set the column names, then add the rownames as a column.
+Once we've done that, we'll use the `left_join()` strategy to incorporate the metadata again.
+Let's have a look first.
+
+```{r}
+mds@.Data[[3]] %>%
+  as.data.frame() %>%
+  set_colnames(c("Dim1", "Dim2")) %>%
+  rownames_to_column("SampleID") %>%
+  left_join(mData)
+```
+
+OK, now we can plot this using `geom_point()`as our geometry.
+We'll also increase the point size for a nicer plot, as well as manually specifying the colours.
+
+```{r}
+mds@.Data[[3]] %>%
+  as.data.frame() %>%
+  set_colnames(c("Dim1", "Dim2")) %>%
+  rownames_to_column("SampleID") %>%
+  left_join(mData) %>%
+  ggplot(aes(x = Dim1, y = Dim2, colour = Condition)) +
+  geom_point(size = 3) + 
+  scale_colour_manual(values = c("black", "red")) +
+  theme_bw()
+```
+
+It appears that one of our Control samples is inconsistent with the others, but which one is it?
+We can add labels to find this out, using a second layer of geometry via `geom_text()`
+
+```{r}
+mds@.Data[[3]] %>%
+  as.data.frame() %>%
+  set_colnames(c("Dim1", "Dim2")) %>%
+  rownames_to_column("SampleID") %>%
+  left_join(mData) %>%
+  ggplot(aes(x = Dim1, y = Dim2, colour = Condition)) +
+  geom_point(size = 3) +
+  geom_text(aes(label = Accession)) +
+  scale_colour_manual(values = c("black", "red")) +
+  theme_bw()
+```
+
+OK, that's ugly.
+There's a variation called `geom_text_repel()` in the package `ggrepel`
+
+```{r}
+mds@.Data[[3]] %>%
+  as.data.frame() %>%
+  set_colnames(c("Dim1", "Dim2")) %>%
+  rownames_to_column("SampleID") %>%
+  left_join(mData) %>%
+  ggplot(aes(x = Dim1, y = Dim2, colour = Condition)) +
+  geom_point(size = 3) +
+  geom_text_repel(aes(label = Accession)) +
+  scale_colour_manual(values = c("black", "red")) +
+  theme_bw()
+```
+
+Now we have a better looking plot, and we clearly know which sample we have to investigate further.
 
 
 # RNA Seq
