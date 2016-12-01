@@ -136,7 +136,12 @@ library(reshape2)
 library(magrittr)
 library(ggrepel)
 library(limma)
-library(Glimma)</code></pre>
+library(Glimma)
+library(pheatmap)
+library(ggbio)
+library(GenomicRanges)
+library(GenomeInfoDb)
+library(biovizBase)</code></pre>
 <div id="data-preparation" class="section level1">
 <h1>Data Preparation</h1>
 <div id="todays-rna-seq-data" class="section level2">
@@ -393,6 +398,8 @@ head(results)</code></pre>
   ggplot(aes(x = logFC, y = -log10(P.Value))) +
   geom_point(colour = &quot;grey30&quot;, alpha = 0.5) +
   theme_bw()</code></pre>
+<div id="colouring-de-genes" class="section level3">
+<h3>Colouring DE Genes</h3>
 <p>Now we might want to colour the differentially expressed genes. Here we’ll create an extra column on the fly, denoting a significantly DE gene as one with an <span class="math inline">\(FDR\)</span>-adjusted <span class="math inline">\(p\)</span>-value <span class="math inline">\(&lt;0.01\)</span>. Notice that we’ve added the colour strictly as part of the aesthetics for the points. The reasons for this will become clear in a few plots time.</p>
 <pre class="r"><code>results %&gt;%
   mutate(DE = adj.P.Val &lt; 0.01) %&gt;%
@@ -427,6 +434,9 @@ head(results)</code></pre>
                   colour = &quot;red&quot;) +
   geom_vline(xintercept = c(-1, 1), colour = &quot;red&quot;, linetype = 2) +
   theme_bw()</code></pre>
+</div>
+<div id="colouring-gene-subtypes" class="section level3">
+<h3>Colouring Gene Subtypes</h3>
 <p>Instead of labelling the top DE genes, maybe we would like to see which <code>lincRNA</code> genes are differentially expressed. Increasing the transparency of the main points can help these stand out. Note also, that we’ve sinmply overlaid these genes using the filtered <code>results</code> object in exactly the same way that we’ve added the labels.</p>
 <pre class="r"><code>results %&gt;%
   mutate(DE = adj.P.Val &lt; 0.01 &amp; abs(logFC) &gt; 1) %&gt;%
@@ -447,28 +457,134 @@ head(results)</code></pre>
   geom_vline(xintercept = c(-1, 1), colour = &quot;red&quot;, linetype = 2) +
   theme_bw()</code></pre>
 </div>
+</div>
 <div id="making-a-heatmap" class="section level2">
 <h2>Making a heatmap</h2>
-<p>Let’s make a heatmap of these <code>lincRNA</code> genes.</p>
+<p>Let’s make a heatmap of these DE <code>lincRNA</code> genes. Firstly, we’ll just create a <code>data.frame</code> with the information for this subset of genes</p>
+<pre class="r"><code>deLincRNA &lt;- results %&gt;%
+  filter(gene_biotype == &quot;lincRNA&quot;,
+         adj.P.Val &lt; 0.01, 
+         abs(logFC) &gt; 1) %&gt;%
+  dplyr::select(contains(&quot;gene&quot;))</code></pre>
+<p>Now we’ll transform the raw counts to <span class="math inline">\(log(CPM)\)</span> (counts per million) and use the list of DE lincRNAs to extract just the data we need. Once we’ve done this, we can pass the results to the function <code>pheatmap()</code> from the package `pheatmap.</p>
+<pre class="r"><code>dgeList %&gt;%
+  cpm(log = TRUE) %&gt;%
+  extract(deLincRNA$ensembl_gene_id,) %&gt;%
+  pheatmap()</code></pre>
+<p>This has used the default <code>pheatmap</code> colour scheme, which isn’t too bad, but we can tweak this if we’d like. Unfortunately, the method for generating these colours can be a bit tricky so below is a simplified version. What we’re doing in the below is specifying the colours for low, mid and high values, then using the function <code>colorRampPalette()</code> to create a vector of 100 colours moving gradually through the three as specified.</p>
+<pre class="r"><code>heatCols &lt;- colorRampPalette(c(&quot;blue&quot;, &quot;white&quot;, &quot;red&quot;))(100)</code></pre>
+<p>The results are using the three channels of <code>rgb</code> which are encoded in hexadecimal values. The first two digits after the hash represent the <code>red</code> channel, then the next two represent the <code>green</code> channel with the final two digits representing the <code>blue</code> channel. As you can see, the first value created in <code>heatCols</code> is all blue (<code>#0000FF</code>), whilst the last is all red (<code>#FF0000</code>).</p>
+<p>Now we can use these colours for our heatmap.</p>
+<pre class="r"><code>dgeList %&gt;%
+  cpm(log = TRUE) %&gt;%
+  extract(deLincRNA$ensembl_gene_id,) %&gt;%
+  pheatmap(color = heatCols)</code></pre>
+<p>As we can see, dendrograms have automatically been placed on the left and top of our heatmap and we can remove these to leave our rows and columns in the original order.</p>
+<pre class="r"><code>dgeList %&gt;%
+  cpm(log = TRUE) %&gt;%
+  extract(deLincRNA$ensembl_gene_id,) %&gt;%
+  pheatmap(color = heatCols,
+           cluster_rows = FALSE, 
+           cluster_cols = FALSE)</code></pre>
+<p>Personally, I like this dataset to be clustered so it shows genes and samples behaving similarly so let’s turn that back on. However, let’s change the rownames to be the common gene name, and the column names to be the GEO Accession ID.</p>
+<pre class="r"><code>dgeList %&gt;%
+  cpm(log = TRUE) %&gt;%
+  extract(deLincRNA$ensembl_gene_id,) %&gt;%
+  set_rownames(deLincRNA$external_gene_name) %&gt;%
+  set_colnames(dgeList$samples$Accession) %&gt;%
+  pheatmap(color = heatCols)</code></pre>
+<p>Now that we’ve used the Accession IDs, it’s not so clear which sample is which. We can add a colour guide in <code>pheatmap()</code> using our metadata. This is done by passing a <code>data.frame</code> to the argument <code>annotation_col</code>. However, the rownames of this <code>data.frame</code> must exactly match the column names of our data.matrix.</p>
+<p>The colours for these annotations can also be set manually using the argument <code>annotation_colors</code>. For this argument, we need to provide a <code>list</code> with a named component for each annotaion type (here we’ve specified <code>Condition</code> in the <code>colAnnotations</code> object). Each level of the annotation must also be specified in the colours by name.</p>
+<pre class="r"><code>colAnnotations &lt;- data.frame(Condition = mData$Condition, row.names = mData$Accession)
+annotColours &lt;- list(Condition = c(Control = &quot;black&quot;, SOX5 = &quot;green&quot;))
+dgeList %&gt;%
+  cpm(log = TRUE) %&gt;%
+  extract(deLincRNA$ensembl_gene_id,) %&gt;%
+  set_rownames(deLincRNA$external_gene_name) %&gt;%
+  set_colnames(dgeList$samples$Accession) %&gt;%
+  pheatmap(color = heatCols,
+           annotation_col = colAnnotations,
+           annotation_colors = annotColours)</code></pre>
+<p>This way we can see that each sample type is clustering correctly.</p>
+<p>Separators can also be used to break the heatmap based on the branches of the dendrogram. In the following we’ve specified to break the heatmap into two blocks of columns (<code>cutree_cols = 2</code>), and to group the rows into four blocks (<code>cutree_rows = 4</code>).</p>
+<p>These bloack sizes were determined manually, by simple inspection and should be chosen in a way that makes clear sense. This can help give clear indications as which samples are behaving alike, and which genes are also behaving alike.</p>
+<pre class="r"><code>dgeList %&gt;%
+  cpm(log = TRUE) %&gt;%
+  extract(deLincRNA$ensembl_gene_id,) %&gt;%
+  set_rownames(deLincRNA$external_gene_name) %&gt;%
+  set_colnames(dgeList$samples$Accession) %&gt;%
+  pheatmap(color = heatCols,
+           annotation_col = colAnnotations,
+           annotation_colors = annotColours,
+           cutree_cols = 2,
+           cutree_rows = 4)</code></pre>
+<p>Finally, the width and height of each cell can be set manually to fit the figure for your paper. This value is defined in “points” so may take a bit of experimentation when preparing for publication.</p>
+<pre class="r"><code>dgeList %&gt;%
+  cpm(log = TRUE) %&gt;%
+  extract(deLincRNA$ensembl_gene_id,) %&gt;%
+  set_rownames(deLincRNA$external_gene_name) %&gt;%
+  set_colnames(dgeList$samples$Accession) %&gt;%
+  pheatmap(color = heatCols,
+           cellwidth = 20,
+           annotation_col = colAnnotations,
+           annotation_colors = annotColours,
+           cutree_cols = 2,
+           cutree_rows = 4)</code></pre>
 </div>
-</div>
-<div id="rna-seq" class="section level1">
-<h1>RNA Seq</h1>
-<ul>
-<li>PCA with ellipses</li>
-<li>PCR with error bars</li>
-<li>pheatmap with extra annotations</li>
-</ul>
 </div>
 <div id="snp-data" class="section level1">
 <h1>SNP data</h1>
+<div id="introduction-to-granges" class="section level2">
+<h2>Introduction to GRanges</h2>
+<p>Some other types of plot whic people find useful are manhattan plots, for showing data along chromosomes, and circos plots. For these plot types, the package <code>ggbio</code> can be used, and data needs to be defined using <code>GenomicRanges</code> (or <code>GRanges</code>) objects.</p>
+<p>At the foundation of a <code>GRanges</code> object is another object known as a <code>Seqinfo</code> object, which contains the key summary information about each chromosome, or sequence that we are plotting. Let’s download this from the UCSC for hg18, as that’s the genome for some sample data we’ll use in a minute. (<em>Please ignore any warning about NCBI seqlevel was set to NA</em>)</p>
+<pre class="r"><code>hg18 &lt;- fetchExtendedChromInfoFromUCSC(&quot;hg18&quot;)</code></pre>
+<p>Now let’s form a <code>seqinfo</code> object for just the autosomes, but we’ll use the values <code>1:22</code> instead of <code>crhr1:chr22</code> for our chromosome names.</p>
+<pre class="r"><code>autosomeSeq &lt;-  Seqinfo(seqnames = hg18$NCBI_seqlevel[1:22],
+                       seqlengths = hg18$UCSC_seqlength[1:22], 
+                       isCircular = rep(FALSE, 22), 
+                       genome = &quot;hg18&quot;)
+autosomeSeq</code></pre>
+<p>For our sample SNP data, we’ll use some that should be installed as part of the <code>biovizBase</code> package</p>
+<pre class="r"><code>snp &lt;- read.table(system.file(&quot;extdata&quot;, &quot;plink.assoc.sub.txt&quot;, package = &quot;biovizBase&quot;),
+                  header = TRUE)
+head(snp)</code></pre>
+<p>Here we have the location and identifier for each SNP, as well as some frequency information a <span class="math inline">\(\chi^2\)</span> statistic and <span class="math inline">\(p\)</span>-value. We’ll define each SNP as a <em>range</em> of nucleotides withinthe genome, except with a width of one. For genes and exons defined as <code>GRanges</code> the width would correspond to the appropriate number of nucleotides, but for SNPs it’s only a single base. To form a GRanges object, it’s also best to arrange these by genomic position. After sorting we’ll also remove those for which we have no <span class="math inline">\(p\)</span>-value</p>
+<pre class="r"><code>gr.snp &lt;- snp %&gt;%
+  arrange(CHR, BP) %&gt;%
+  filter(!is.na(P)) %&gt;%
+  transformDfToGr(seqnames = &quot;CHR&quot;, start = &quot;BP&quot;, width = 1)
+seqinfo(gr.snp) &lt;- autosomeSeq
+gr.snp</code></pre>
+<p>In this last step we added the correct sequence lengths to the <code>gr.snp</code> object. Otherwise these values would have corresponded to the highest value in the <code>BP</code> column for each chromosome.</p>
+</div>
+<div id="karyogram-plots" class="section level2">
+<h2>Karyogram Plots</h2>
+<p>Let’s check where out SNPs are using <code>plotKaryogram()</code> from the package <code>ggbio</code></p>
+<pre class="r"><code>plotKaryogram(gr.snp)</code></pre>
+<p>This is an extended <code>ggplot2</code> object, so we can modify using our existing strategies.</p>
+<pre class="r"><code>plotKaryogram(gr.snp) +
+  labs(x = &quot;SNP Positions&quot;)</code></pre>
+</div>
+<div id="manhattan-plots" class="section level2">
+<h2>Manhattan Plots</h2>
+<p>To make a Manhattan Plot we simply call the function <code>plotGrandLinear()</code> and we can again transform the <span class="math inline">\(p\)</span>-values using the <code>-log10()</code> strategy on the fly.</p>
+<pre class="r"><code>plotGrandLinear(gr.snp, aes(y = -log10(P)))</code></pre>
+<p>This plot also has the same basic features as one created using <code>ggplot2</code> so we can remove the background with <code>theme_bw()</code> and add a cutoff line to indicate significance</p>
+<pre class="r"><code>plotGrandLinear(gr.snp, aes(y = -log10(P)), cutoff = 3) +
+  guides(colour = FALSE) +
+  theme_bw() +
+  theme(panel.grid.minor = element_blank()) +
+  labs(x = &quot;Chromosome&quot;)</code></pre>
+</div>
+<div id="circos-plots" class="section level2">
+<h2>Circos Plots</h2>
 <ul>
-<li>also a <code>pheatmap</code></li>
-<li>manhattan plot</li>
 <li>circos plot</li>
 </ul>
 <p><a href="http://www.gettinggeneticsdone.com/search?updated-min=2016-01-01T00:00:00-06:00&amp;updated-max=2017-01-01T00:00:00-06:00&amp;max-results=5" class="uri">http://www.gettinggeneticsdone.com/search?updated-min=2016-01-01T00:00:00-06:00&amp;updated-max=2017-01-01T00:00:00-06:00&amp;max-results=5</a></p>
 <p><a href="http://rstudio-pubs-static.s3.amazonaws.com/2176_09c34787e1c64584a2bc84444afa7c61.html" class="uri">http://rstudio-pubs-static.s3.amazonaws.com/2176_09c34787e1c64584a2bc84444afa7c61.html</a></p>
+</div>
 </div>
 
 
