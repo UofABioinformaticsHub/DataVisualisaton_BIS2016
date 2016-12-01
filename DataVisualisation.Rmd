@@ -24,6 +24,8 @@ library(stringr)
 library(reshape2)
 library(magrittr)
 library(ggrepel)
+library(limma)
+library(Glimma)
 ```
 
 
@@ -70,6 +72,7 @@ Form a `DGEList`, ignoring some of the columns in the meta data that will alread
 dgeList <- DGEList(counts, 
                    samples = dplyr::select(mData, -Condition, -SampleID), 
                    group = mData$Condition)
+dgeList <- calcNormFactors(dgeList)
 ```
 
 The Library sizes & total read numbers don't match, this will likely be due to:
@@ -416,7 +419,7 @@ mds@.Data[[3]] %>%
   theme_bw()
 ```
 
-OK, that's ugly.
+OK, that's ugly!
 There's a variation called `geom_text_repel()` in the package `ggrepel`
 
 ```{r}
@@ -434,12 +437,147 @@ mds@.Data[[3]] %>%
 
 Now we have a better looking plot, and we clearly know which sample we have to investigate further.
 
+### Bonus Interactive MDS Plots
+
+In addition to nicely formatting our MDS plot, the package `Glimma` enables you to create an MDS plot to provide an interactive output.
+This will automatically open an html file in your browser, and will also write this file to your working directory.
+
+
+```{r eval=FALSE}
+glMDSPlot(dgeList, labels = dgeList$samples$Accession, groups = dgeList$samples$group)
+```
+
+Hovering above the points will show the information about each sample.
+By clicking on the barplot on the right of the page, you can select the component which appears on the `x`-axis, and the subsequent component will appear on the `y`-axis.
+
+
+## Differential Expression
+
+Now we've inspected our data prior to finding differentially expression genes, let's use `limma-voom` to obtain differentially-expressed genes and estimates of fold-change (i.e. logFC).
+First we'll need to create a design matrix, and then we'll fit the precision weights with `voom()`, the linear model for each gene with `lmFit()` and moderated $t$-statistics using `eBayes()`.
+Here we'll use the `magrittr` to perform this in one easy series of commands.
+
+```{r}
+des <- model.matrix(~group, data = dgeList$samples)
+colnames(des) <- c("Intercept", "SOX5")
+fit <- dgeList %>%
+  voom(design = des) %>%
+  lmFit(design = des) %>%
+  eBayes()
+```
+
+Now place the results in a separate object, using the coefficient `SOX5` (i.e. the second column of the design matrix).
+
+```{r}
+results <- topTable(fit, coef = "SOX5", n = length(dgeList))
+head(results)
+```
+
+## Making Our Own Volcano Plot.
+
+An alternative to the default volcano plot is to use `-log10()` to transform the $p$-values (in the column `P.Value` in the `results` object), and plot this on the `y`-axis, with the estiamted fold-change on the `x`-axis.
+We can do this using `ggplot()`, and in this initial call we've set the default point colour to `grey30` and made the points slightly transparent (`alpha = 0.5`)
+
+```{r}
+results %>%
+  ggplot(aes(x = logFC, y = -log10(P.Value))) +
+  geom_point(colour = "grey30", alpha = 0.5) +
+  theme_bw()
+```
+
+Now we might want to colour the differentially expressed genes.
+Here we'll create an extra column on the fly, denoting a significantly DE gene as one with an $FDR$-adjusted $p$-value $<0.01$.
+Notice that we've added the colour strictly as part of the aesthetics for the points.
+The reasons for this will become clear in a few plots time.
+
+```{r}
+results %>%
+  mutate(DE = adj.P.Val < 0.01) %>%
+  ggplot(aes(x = logFC, y = -log10(P.Value), colour = DE)) +
+  geom_point(aes(colour = DE), alpha = 0.5) +
+  scale_colour_manual(values = c("grey30", "red")) +
+  theme_bw()
+```
+
+That's a lot of genes, so let's include a filter such that the estimated logFC is beyond $\pm1$.
+
+```{r}
+results %>%
+  mutate(DE = adj.P.Val < 0.01 & abs(logFC) > 1) %>%
+  ggplot(aes(x = logFC, y = -log10(P.Value), colour = DE)) +
+  geom_point(aes(colour = DE), alpha = 0.5) +
+  scale_colour_manual(values = c("grey30", "red")) +
+  theme_bw()
+```
+
+And we can also add a label to some of the top genes.
+Let's just add labels to the top 10.
+To do this, we've supplied a new object to the `geom_text_repel()` function, which is just the first 10 lines of the `results` object.
+As this won't have the column `DE`, this is why we made this colouring specific to the `geom_point()` function a few lines back.
+If we'd left this as a global parameter, we'd get an error here.
+
+```{r}
+results %>%
+  mutate(DE = adj.P.Val < 0.01 & abs(logFC) > 1) %>%
+  ggplot(aes(x = logFC, y = -log10(P.Value))) +
+  geom_point(aes(colour = DE), alpha = 0.5) +
+  scale_colour_manual(values = c("grey30", "red")) +
+  geom_text_repel(data = results[1:12,],
+                  aes(label = external_gene_name)) +
+  theme_bw()
+```
+
+We could also change the colour of the labels if we'd like.
+In this final plot, we'll also add lines for a logFC of $\pm1$.
+
+```{r}
+results %>%
+  mutate(DE = adj.P.Val < 0.01 & abs(logFC) > 1) %>%
+  ggplot(aes(x = logFC, y = -log10(P.Value))) +
+  geom_point(aes(colour = DE), alpha = 0.5) +
+  scale_colour_manual(values = c("grey30", "red")) +
+  geom_text_repel(data = results[1:12,],
+                  aes(label = external_gene_name),
+                  colour = "red") +
+  geom_vline(xintercept = c(-1, 1), colour = "red", linetype = 2) +
+  theme_bw()
+```
+
+ Instead of labelling the top DE genes, maybe we would like to see which `lincRNA` genes are differentially expressed.
+Increasing the transparency of the main points can help these stand out.
+Note also, that we've sinmply overlaid these genes using the filtered `results` object in exactly the same way that we've added the labels.
+ 
+ 
+```{r}
+results %>%
+  mutate(DE = adj.P.Val < 0.01 & abs(logFC) > 1) %>%
+  ggplot(aes(x = logFC, y = -log10(P.Value))) +
+  geom_point(aes(colour = DE), alpha = 0.3) +
+  scale_colour_manual(values = c("grey30", "red")) +
+  geom_point(data = filter(results, 
+                                gene_biotype == "lincRNA",
+                                adj.P.Val < 0.01,
+                                abs(logFC) > 1),
+                  colour = "blue") +
+  geom_text_repel(data = filter(results, 
+                                gene_biotype == "lincRNA",
+                                adj.P.Val < 0.01,
+                                abs(logFC) > 1),
+                  aes(label = external_gene_name),
+                  colour = "blue") +
+  geom_vline(xintercept = c(-1, 1), colour = "red", linetype = 2) +
+  theme_bw()
+```
+
+## Making a heatmap
+
+Let's make a heatmap of these `lincRNA` genes.
+
 
 # RNA Seq
 
 - PCA with ellipses
 - PCR with error bars
-- Volcano plot with labels
 - pheatmap with extra annotations
 
 # SNP data
