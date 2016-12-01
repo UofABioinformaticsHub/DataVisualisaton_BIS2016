@@ -6,7 +6,7 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, include = TRUE, 
+knitr::opts_chunk$set(echo = TRUE, include = TRUE, eval = FALSE,
                       results = "hide", fig.show = "hide",
                       warning = FALSE, message = FALSE)
 ```
@@ -723,28 +723,39 @@ Some other types of plot whic people find useful are manhattan plots, for showin
 For these plot types, the package `ggbio` can be used, and data needs to be defined using `GenomicRanges` (or `GRanges`) objects.
 
 At the foundation of a `GRanges` object is another object known as a `Seqinfo` object, which contains the key summary information about each chromosome, or sequence that we are plotting.
-Let's download this from the UCSC for hg18, as that's the genome for some sample data we'll use in a minute.
+Let's download this from the UCSC for hg38, as that's the genome for some sample data we'll use in a minute.
 (*Please ignore any warning about NCBI seqlevel was set to NA*)
 
-```{r}
-hg18 <- fetchExtendedChromInfoFromUCSC("hg18")
+```{r, eval=FALSE}
+hg38 <- fetchExtendedChromInfoFromUCSC("hg38")
 ```
+
+If this download fails, load the file from your `data` directory using the following code
+```{r}
+hg38 <- read_delim("data/chromInfo.txt", delim = "\t", col_names = FALSE) %>%
+  set_names(c("UCSC_seqlevel", "UCSC_seqlength", "ref")) %>%
+  dplyr::select(-ref) %>%
+  mutate(NCBI_seqlevel = if_else(UCSC_seqlevel %in% paste0("chr", 1:22), 
+                                 gsub("chr", "", UCSC_seqlevel), NA_character_),
+         isCircular = FALSE) %>%
+  arrange(as.integer(NCBI_seqlevel))
+```
+
 
 Now let's form a `seqinfo` object for just the autosomes, but we'll use the values `1:22` instead of `crhr1:chr22` for our chromosome names.
 
 ```{r}
-autosomeSeq <-  Seqinfo(seqnames = hg18$NCBI_seqlevel[1:22],
-                       seqlengths = hg18$UCSC_seqlength[1:22], 
+autosomeSeq <-  Seqinfo(seqnames = hg38$NCBI_seqlevel[1:22],
+                       seqlengths = hg38$UCSC_seqlength[1:22], 
                        isCircular = rep(FALSE, 22), 
-                       genome = "hg18")
+                       genome = "hg38")
 autosomeSeq
 ```
 
 For our sample SNP data, we'll use some that should be installed as part of the `biovizBase` package
 
 ```{r}
-snp <- read.table(system.file("extdata", "plink.assoc.sub.txt", package = "biovizBase"),
-                  header = TRUE)
+snp <- read_delim("data/snps.txt", delim = "\t")
 head(snp)
 ```
 
@@ -758,6 +769,7 @@ After sorting we'll also remove those for which we have no $p$-value
 gr.snp <- snp %>%
   arrange(CHR, BP) %>%
   filter(!is.na(P)) %>%
+  mutate(Sig = P < 0.001) %>%
   transformDfToGr(seqnames = "CHR", start = "BP", width = 1)
 seqinfo(gr.snp) <- autosomeSeq
 gr.snp
@@ -768,7 +780,8 @@ Otherwise these values would have corresponded to the highest value in the `BP` 
 
 ## Karyogram Plots
 
-Let's check where out SNPs are using `plotKaryogram()` from the package `ggbio`
+Let's check where out SNPs are using `plotKaryogram()` from the package `ggbio`.
+(Ignore any error about `valid.GenomicRanges.seqinfo`...)
 
 ```{r}
 plotKaryogram(gr.snp)
@@ -803,8 +816,60 @@ plotGrandLinear(gr.snp, aes(y = -log10(P)), cutoff = 3) +
 
 ## Circos Plots
 
-- circos plot
+To build all the layers of a Circos plot, we'll need to build multiple `GRanges` objects.
+First we'll start with a `GRanges` objects that just defines the chromosomes.
 
-http://www.gettinggeneticsdone.com/search?updated-min=2016-01-01T00:00:00-06:00&updated-max=2017-01-01T00:00:00-06:00&max-results=5
+```{r}
+chrGR <- GRanges(autosomeSeq)
+```
 
-http://rstudio-pubs-static.s3.amazonaws.com/2176_09c34787e1c64584a2bc84444afa7c61.html
+Firstly we'll just defined the layout
+
+```{r}
+ggbio() +
+  layout_circle(chrGR, geom = "ideo", fill = "gray70", radius = 60, trackWidth = 10) +
+  layout_circle(chrGR, geom = "text", aes(label = seqnames), radius = 75)
+```
+
+Now we'll setup the results from our SOX5 dataset.
+
+```{r}
+resultsGR <- filter(results, chromosome_name %in% 1:22) %>%
+  mutate(strand = if_else(strand == 1, "+", "-"),
+         sigDE = abs(logFC) > 1 & adj.P.Val < 0.05) %>%
+  arrange(chromosome_name, start_position) %>%
+  makeGRangesFromDataFrame(keep.extra.columns = TRUE,
+                           seqinfo = autosomeSeq,
+                           start.field = "start_position",
+                           end.field = "end_position")
+```
+
+
+And we could add a layer with the significant SNPs.
+
+```{r}
+ggbio() +
+  layout_circle(gr.snp, geom = "ideo", fill = "gray70", radius = 60, trackWidth = 10) +
+  layout_circle(chrGR, geom = "text", aes(label = seqnames), radius = 70) +
+  layout_circle(resultsGR, geom = "line", aes(y = logFC, colour = sigDE), 
+                radius = 40, trackWidth = 20) +
+  layout_circle(subset(gr.snp, Sig), geom = "rect", radius = 30, trackWidth = 10) 
+```
+
+And make some links between the significant SNPs
+
+```{r}
+linked <- subset(gr.snp, Sig)
+values(linked)$link2 <- linked[c(3, 4, 1, 2),]
+```
+
+```{r}
+ggbio() +
+  layout_circle(gr.snp, geom = "ideo", fill = "gray70", radius = 60, trackWidth = 10) +
+  layout_circle(chrGR, geom = "text", aes(label = seqnames), radius = 70) +
+  layout_circle(resultsGR, geom = "line", aes(y = logFC, colour = sigDE), 
+                radius = 40, trackWidth = 20) +
+  layout_circle(subset(gr.snp, Sig), geom = "rect", colour = "red", 
+                radius = 30, trackWidth = 10) +
+  layout_circle(linked, geom = "link", linked.to = "link2",radius = 20)
+```
