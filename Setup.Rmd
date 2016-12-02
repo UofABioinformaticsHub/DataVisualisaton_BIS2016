@@ -1,0 +1,46 @@
+---
+title: "Computer Setup"
+author: "Steve Pederson"
+date: "2 December 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, include = TRUE, eval = FALSE,
+                      results = "hide", fig.show = "hide",
+                      warning = FALSE, message = FALSE)
+```
+
+# Package Installation
+
+As some packages for today may not be installed on your VM, or your local computer.
+Please note, if you have a networked `My Documents` or `home` folder on a University laptop, we advise using the VMs today to avoid some potential issues that can arise with this configuration.
+
+Please run the following script using cut & paste into your R Session
+
+```{r eval=FALSE}
+req <- c("readr", "dplyr", "tibble", "magrittr", "edgeR", "ggplot2", "ggbio", "biomaRt", "stringr", "reshape2", "magrittr", "ggrepel", "limma", "Glimma", "pheatmap", "ggbio", "GenomicRanges", "GenomeInfoDb", "biovizBase")
+installed <- rownames(installed.packages())
+need <- setdiff(req, installed)
+if (length(need) > 0){
+  source("https://bioconductor.org/biocLite.R")
+  biocLite(need)
+}
+message("This looks promising. Hopefully you'll be OK now")
+```
+
+# Today's Data
+
+Please start a new R Project for today to ensure a clean workspace.
+To do this:
+
+1. `File > New Project`
+2. If asked, save or don't save your current work. That's up to you. There's no right or wrong at this step.
+2. Choose either `New Directory > Empty Project` or `Existing Directory`
+
+This will clear all information from your workspace and ensure you have the correct directory structure.
+
+Today's data can be downloaded from [this link](https://minhaskamal.github.io/DownGit/#/home?url=https:%2F%2Fgithub.com%2FUofABioinformaticsHub%2FDataVisualisaton_BIS2016%2Ftree%2Fgh-pages%2Fdata).
+
+Save the downloaded file (`data.zip`) in the main directory associated with today's project and unzip as a folder called `data`
+

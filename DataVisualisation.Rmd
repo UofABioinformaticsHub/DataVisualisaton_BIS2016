@@ -2,8 +2,13 @@
 title: "Data Visualisation"
 author: "Steve Pederson"
 date: "2 December 2016"
-output: html_document
+output: 
+  html_document:
+    toc: true
+    depth: 2
 ---
+
+# Loading All Packages
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, include = TRUE, eval = FALSE,
@@ -66,27 +71,10 @@ head(counts)
 
 The rownames here are the gene ids, but we might like to tidy those up a little by removing the suffix.
 
-```{r}
+```{r ensemblIDs}
 ensemblIDs <- str_extract(rownames(counts),  "ENSG[0-9]+") 
 rownames(counts) <- ensemblIDs
 ```
-
-Form a `DGEList`, ignoring some of the columns in the meta data that will already be included as art of the standard `DGEList`structure.
-
-```{r dgeList}
-dgeList <- DGEList(counts, 
-                   samples = dplyr::select(mData, -Condition, -SampleID), 
-                   group = mData$Condition)
-dgeList <- calcNormFactors(dgeList)
-```
-
-The Library sizes & total read numbers don't match, this will likely be due to:
-
-- `Total_Reads` counting read pairs as two separate reads
-- Some reads not aligning
-- Some reads aligning mutliple times
-
-Alignment and generation of read summaries was performed by the authors prior to uploading and is not of great importance for today.
 
 ## Getting Some Gene Annotations
 
@@ -121,18 +109,37 @@ Unfortunately, it looks like some genes are missing and our downloaded data won'
 
 ```{r compLens}
 length(ensemblIDs)
-nrow(dgeList)
 nrow(geneData)
 ```
 
-We can resolve this using the function `left_join()` from the package `dplyr` while we add this to our `dgeList` objects.
+We can resolve this using the function `left_join()` from the package `dplyr`.
 This will take the first `data_frame` as the reference, then add a row filled with `NA` values for the EnsemblIDs not returned by the function `getBM()` as they will be missing from the `geneData` object.
 
-```{r addGenes}
-dgeList$genes <- left_join(x = data_frame(ensembl_gene_id = ensemblIDs),
-                           y = geneData)
+```{r}
+geneData <- left_join(x = data_frame(ensembl_gene_id = ensemblIDs),
+                      y = geneData)
 ```
 
+
+## Creating a `DGEList` object
+
+Form a `DGEList`, ignoring some of the columns in the meta data that will already be included as art of the standard `DGEList`structure.
+
+```{r dgeList}
+dgeList <- DGEList(counts, 
+                   samples = dplyr::select(mData, -Condition, -SampleID), 
+                   group = mData$Condition,
+                   genes = geneData)
+dgeList <- calcNormFactors(dgeList)
+```
+
+The Library sizes & total read numbers don't match, this will likely be due to:
+
+- `Total_Reads` counting read pairs as two separate reads
+- Some reads not aligning
+- Some reads aligning multiple times
+
+Alignment and generation of read summaries was performed by the authors prior to uploading and is not of great importance for today.
 
 # Some Initial Plots
 
@@ -166,7 +173,7 @@ To generate an actual plot, `ggplot2` requires us to specify the plotting geomet
 There are many types of `geom` functions, but here we'll start with `geom_bar()`.
 By default this tries to add any like values, so we'll need to use the additional command `stat ="identity"` to tell the function to just plot the actual numbers we give it.
 
-Note that this now requires as to use a `+` symbol at the endof the initial function.
+Note that this now requires as to use a `+` symbol at the end of the initial function.
 This tells `R` there is more to come, and that we are adding layers to this object.
 
 ```{r}
@@ -237,7 +244,7 @@ ggplot(dgeList$samples, aes(x = Accession, y = lib.size/1e06, fill = group)) +
 
 ### The use of elements
 
-In the `theme()` function plotting aspects which are text based are always set using `element_text()`, whilst those which are line based areset using `element_line()`.
+In the `theme()` function plotting aspects which are text based are always set using `element_text()`, whilst those which are line based are set using `element_line()`.
 Things like the plot outline are set using `element_rect()`, whilst the entire plotting aspect can be removed using `element_blank()`.
 If we'd used `theme(axis.text.x = element_blank())` in the above, the `x`-axis labels would have been removed.
 If you're racing ahead, try it..
@@ -282,7 +289,7 @@ ggplot(dgeList$samples, aes(x = Accession, y = lib.size/1e06, fill = group)) +
   guides(fill = FALSE)
 ```
 
-OK! NOw we've covereda huge amount of the terminology for `ggplot2`, we'll keep using this and try a few different types of plots.
+OK! Now we've covered a huge amount of the terminology for `ggplot2`, we'll keep using this and try a few different types of plots.
 
 ## Boxplots For Each Sample
 
@@ -310,7 +317,7 @@ dgeList$counts %>%
 
 Note that now we have a `data.frame` (i.e. two columns are text, whilst one is an integer), and that now our counts are all in a single column.
 We can also use the `magrittr` to place our molten data into the `ggplot()` function.
-After we've done this, wejust keep adding layers like before, but this time our geometry will be `geom_boxplot()`.
+After we've done this, we just keep adding layers like before, but this time our geometry will be `geom_boxplot()`.
 
 ```{r}
 dgeList$counts %>%
@@ -480,7 +487,7 @@ head(results)
 
 ## Making Our Own Volcano Plot.
 
-An alternative to the default volcano plot is to use `-log10()` to transform the $p$-values (in the column `P.Value` in the `results` object), and plot this on the `y`-axis, with the estiamted fold-change on the `x`-axis.
+An alternative to the default volcano plot is to use `-log10()` to transform the $p$-values (in the column `P.Value` in the `results` object), and plot this on the `y`-axis, with the estimated fold-change on the `x`-axis.
 We can do this using `ggplot()`, and in this initial call we've set the default point colour to `grey30` and made the points slightly transparent (`alpha = 0.5`)
 
 ```{r}
@@ -554,7 +561,7 @@ results %>%
 
 Instead of labelling the top DE genes, maybe we would like to see which `lincRNA` genes are differentially expressed.
 Increasing the transparency of the main points can help these stand out.
-Note also, that we've sinmply overlaid these genes using the filtered `results` object in exactly the same way that we've added the labels.
+Note also, that we've simply overlaid these genes using the filtered `results` object in exactly the same way that we've added the labels.
  
  
 ```{r}
@@ -652,7 +659,7 @@ This is done by passing a `data.frame` to the argument `annotation_col`.
 However, the rownames of this `data.frame` must exactly match the column names of our data.matrix.
 
 The colours for these annotations can also be set manually using the argument `annotation_colors`.
-For this argument, we need to provide a `list` with a named component for each annotaion type (here we've specified `Condition` in the `colAnnotations` object).
+For this argument, we need to provide a `list` with a named component for each annotation type (here we've specified `Condition` in the `colAnnotations` object).
 Each level of the annotation must also be specified in the colours by name.
 
 ```{r}
@@ -673,7 +680,7 @@ This way we can see that each sample type is clustering correctly.
 Separators can also be used to break the heatmap based on the branches of the dendrogram.
 In the following we've specified to break the heatmap into two blocks of columns (`cutree_cols = 2`), and to group the rows into four blocks (`cutree_rows = 4`).
 
-These bloack sizes were determined manually, by simple inspection and should be chosen in a way that makes clear sense.
+These block sizes were determined manually, by simple inspection and should be chosen in a way that makes clear sense.
 This can help give clear indications as which samples are behaving alike, and which genes are also behaving alike.
 
 ```{r}
@@ -706,20 +713,43 @@ dgeList %>%
            cutree_rows = 4)
 ```
 
+### Another bonus Interactive Plot
+
+First we need to define our results using the standard practices of `limma`.
+This will produce a column for each column of the design matrix with `-1, 0` or `1` indicating whether a gene has been classed as down-regulated, unchanged or up-regulated respectively.
+The first column here refers to the mean expression & is meaningless in today's experiment.
+(Formally it's testing for an expression level of zero in the control samples.)
+The second column shows how many DE genes we have due to `SOX5` over-expression.
+
+```{r}
+sigDE <- decideTests(fit, p.value = 0.01, lfc = 1)
+summary(sigDE)
+```
+
+Now we can launch an interactive plot.
+However a few things are noteworthy in the following code:
+
+1. We need to specify the raw count matrix from `dgeList` as this can be used to manually inspect values in the interactive plot
++ By default this function requires a column called `GeneID` so we have to rename the column `ensembl_gene_id`. Here we've just done this on the fly.
++ We'll use the group information in the column `dgeList$samples$group` to colour our samples.
++ DE status is indicated using the argument `status = sigDE[,"SOX5"]`.
 
 
-```{r, eval=FALSE, echo=FALSE}
-# Extras to add later
-# - PCA with ellipses
-# - PCR with error bars
+```{r}
+glMDPlot(fit, 
+         counts = dgeList$counts, 
+         anno = dplyr::rename(dgeList$genes, GeneID = ensembl_gene_id),
+         groups = dgeList$samples$group,
+         status = sigDE[,"SOX5"]
+         )
 ```
 
 
-# SNP data
+# Using `ggbio`
 
 ## Introduction to GRanges
 
-Some other types of plot whic people find useful are manhattan plots, for showing data along chromosomes, and circos plots.
+Some other types of plot which people find useful are Manhattan plots, for showing data along chromosomes, and circos plots.
 For these plot types, the package `ggbio` can be used, and data needs to be defined using `GenomicRanges` (or `GRanges`) objects.
 
 At the foundation of a `GRanges` object is another object known as a `Seqinfo` object, which contains the key summary information about each chromosome, or sequence that we are plotting.
@@ -730,7 +760,8 @@ Let's download this from the UCSC for hg38, as that's the genome for some sample
 hg38 <- fetchExtendedChromInfoFromUCSC("hg38")
 ```
 
-If this download fails, load the file from your `data` directory using the following code
+If this download fails, load the file from your `data` directory using the following code.
+
 ```{r}
 hg38 <- read_delim("data/chromInfo.txt", delim = "\t", col_names = FALSE) %>%
   set_names(c("UCSC_seqlevel", "UCSC_seqlength", "ref")) %>%
@@ -760,22 +791,23 @@ head(snp)
 ```
 
 Here we have the location and identifier for each SNP, as well as some frequency information a $\chi^2$ statistic and $p$-value.
-We'll define each SNP as a _range_ of nucleotides withinthe genome, except with a width of one.
+We'll define each SNP as a _range_ of nucleotides within the genome, except with a width of one.
 For genes and exons defined as `GRanges` the width would correspond to the appropriate number of nucleotides, but for SNPs it's only a single base.
 To form a GRanges object, it's also best to arrange these by genomic position.
-After sorting we'll also remove those for which we have no $p$-value
+After sorting we'll also remove those for which we have no $p$-value.
 
 ```{r}
-gr.snp <- snp %>%
+snpGR <- snp %>%
   arrange(CHR, BP) %>%
   filter(!is.na(P)) %>%
   mutate(Sig = P < 0.001) %>%
+  as.data.frame() %>%
   transformDfToGr(seqnames = "CHR", start = "BP", width = 1)
-seqinfo(gr.snp) <- autosomeSeq
-gr.snp
+seqinfo(snpGR) <- autosomeSeq
+snpGR
 ```
 
-In this last step we added the correct sequence lengths to the `gr.snp` object.
+In this last step we added the correct sequence lengths to the `snpGR` object.
 Otherwise these values would have corresponded to the highest value in the `BP` column for each chromosome.
 
 ## Karyogram Plots
@@ -784,13 +816,13 @@ Let's check where out SNPs are using `plotKaryogram()` from the package `ggbio`.
 (Ignore any error about `valid.GenomicRanges.seqinfo`...)
 
 ```{r}
-plotKaryogram(gr.snp)
+plotKaryogram(snpGR)
 ```
 
 This is an extended `ggplot2` object, so we can modify using our existing strategies.
 
 ```{r}
-plotKaryogram(gr.snp) +
+plotKaryogram(snpGR) +
   labs(x = "SNP Positions")
 ```
 
@@ -799,14 +831,14 @@ plotKaryogram(gr.snp) +
 To make a Manhattan Plot we simply call the function `plotGrandLinear()` and we can again transform the $p$-values using the `-log10()` strategy on the fly.
 
 ```{r}
-plotGrandLinear(gr.snp, aes(y = -log10(P)))
+plotGrandLinear(snpGR, aes(y = -log10(P)))
 ```
 
 
 This plot also has the same basic features as one created using `ggplot2` so we can remove the background with `theme_bw()` and add a cutoff line to indicate significance
 
 ```{r}
-plotGrandLinear(gr.snp, aes(y = -log10(P)), cutoff = 3) +
+plotGrandLinear(snpGR, aes(y = -log10(P)), cutoff = 3) +
   guides(colour = FALSE) +
   theme_bw() +
   theme(panel.grid.minor = element_blank()) +
@@ -849,27 +881,27 @@ And we could add a layer with the significant SNPs.
 
 ```{r}
 ggbio() +
-  layout_circle(gr.snp, geom = "ideo", fill = "gray70", radius = 60, trackWidth = 10) +
+  layout_circle(snpGR, geom = "ideo", fill = "gray70", radius = 60, trackWidth = 10) +
   layout_circle(chrGR, geom = "text", aes(label = seqnames), radius = 70) +
   layout_circle(resultsGR, geom = "line", aes(y = logFC, colour = sigDE), 
                 radius = 40, trackWidth = 20) +
-  layout_circle(subset(gr.snp, Sig), geom = "rect", radius = 30, trackWidth = 10) 
+  layout_circle(subset(snpGR, Sig), geom = "rect", radius = 30, trackWidth = 10) 
 ```
 
 And make some links between the significant SNPs
 
 ```{r}
-linked <- subset(gr.snp, Sig)
+linked <- subset(snpGR, Sig)
 values(linked)$link2 <- linked[c(3, 4, 1, 2),]
 ```
 
 ```{r}
 ggbio() +
-  layout_circle(gr.snp, geom = "ideo", fill = "gray70", radius = 60, trackWidth = 10) +
+  layout_circle(snpGR, geom = "ideo", fill = "gray70", radius = 60, trackWidth = 10) +
   layout_circle(chrGR, geom = "text", aes(label = seqnames), radius = 70) +
   layout_circle(resultsGR, geom = "line", aes(y = logFC, colour = sigDE), 
                 radius = 40, trackWidth = 20) +
-  layout_circle(subset(gr.snp, Sig), geom = "rect", colour = "red", 
+  layout_circle(subset(snpGR, Sig), geom = "rect", colour = "red", 
                 radius = 30, trackWidth = 10) +
   layout_circle(linked, geom = "link", linked.to = "link2",radius = 20)
 ```
